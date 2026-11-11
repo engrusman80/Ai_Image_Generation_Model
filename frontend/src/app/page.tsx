@@ -32,6 +32,11 @@ export default function Home() {
       </div>
     );
   }
-  if (!ready) return <p className="mt-16 text-center text-neutral-500">Loading…</p>;
+  if (!ready)
+    return (
+      <div className="grid min-h-dvh place-items-center bg-[#0b0b10]">
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+      </div>
+    );
   return session ? <Chat email={session.user.email ?? null} /> : <AuthForm />;
 }

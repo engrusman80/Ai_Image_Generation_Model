@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Image Chat",
+  title: "Image Studio",
   description: "Create images from text with FLUX",
 };
 

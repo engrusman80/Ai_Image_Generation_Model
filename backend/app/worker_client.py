@@ -10,11 +10,14 @@ All modes use the same job format, so the frontend and backend never change betw
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import io
 import textwrap
 from dataclasses import asdict, dataclass
 
+import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from app.config import Settings
@@ -56,19 +59,54 @@ class MockWorker:
         return WorkerResult(_placeholder_jpeg(job), "image/jpeg")
 
 
+class RunSyncWorker:
+    """Calls a worker that speaks RunPod's /runsync format: {"input": job} -> {"status", "output"}.
+
+    The local laptop worker (worker/local_server.py) uses the same format, so Phase 3 only changes
+    the URL and adds an API key.
+    """
+
+    def __init__(self, url: str, timeout_seconds: float, headers: dict | None = None, transport=None) -> None:
+        self.url = url
+        self.timeout = timeout_seconds
+        self.headers = headers or {}
+        self.transport = transport  # tests pass a fake transport
+
+    async def generate(self, job: WorkerJob) -> WorkerResult:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
+                resp = await client.post(self.url, json={"input": job.payload()}, headers=self.headers)
+        except httpx.TimeoutException:
+            raise WorkerError(f"worker did not answer within {self.timeout:.0f} s") from None
+        except httpx.HTTPError as exc:
+            raise WorkerError(f"cannot reach the worker at {self.url}: {exc}") from None
+        if resp.is_error:
+            raise WorkerError(f"worker HTTP {resp.status_code}: {resp.text[:300]}")
+        body = resp.json()
+        if body.get("status") != "COMPLETED":
+            raise WorkerError(f"worker status {body.get('status')}: {body.get('error')}")
+        output = body.get("output") or {}
+        try:
+            image = base64.b64decode(output["image_base64"], validate=True)
+        except (KeyError, binascii.Error):
+            raise WorkerError("worker returned no valid image") from None
+        return WorkerResult(image, output.get("content_type", "image/jpeg"))
+
+
 class NotReadyWorker:
     def __init__(self, mode: str, phase: int) -> None:
         self.mode, self.phase = mode, phase
 
     async def generate(self, job: WorkerJob) -> WorkerResult:
-        raise WorkerError(f"WORKER_MODE={self.mode} is added in Phase {self.phase}; use WORKER_MODE=mock for now")
+        raise WorkerError(f"WORKER_MODE={self.mode} is added in Phase {self.phase}; use WORKER_MODE=mock or local")
 
 
 def make_worker(settings: Settings):
     if settings.worker_mode == "mock":
         return MockWorker(settings.mock_delay_seconds)
     if settings.worker_mode == "local":
-        return NotReadyWorker("local", 2)
+        url = f"{settings.local_worker_url.rstrip('/')}/runsync"
+        return RunSyncWorker(url, settings.worker_timeout_seconds)
     return NotReadyWorker("runpod", 3)
 
 

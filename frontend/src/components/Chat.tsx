@@ -1,30 +1,49 @@
 "use client";
 
-// The chat page: history of prompts and images, a prompt box with options, loading and error states.
-import { useCallback, useEffect, useRef, useState } from "react";
+// Main app screen: history sidebar on the left, the image conversation in the middle, prompt box below.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type AspectRatio, type GenerateResponse, type Generation, type Me, type PublicConfig } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
+import Composer, { type ComposerHandle } from "./Composer";
+import { ImageCard, Lightbox, PendingCard } from "./ImageCard";
+import { MenuIcon, SparklesIcon } from "./icons";
+import Sidebar, { toHistoryItem, type HistoryItem } from "./Sidebar";
 
-// A chat entry is either a finished image, one still generating, or a failed attempt.
+// A chat entry is a finished image, one still generating, or a failed attempt.
 type Entry =
   | { kind: "done"; gen: Generation }
-  | { kind: "pending"; id: string; prompt: string; aspect: AspectRatio }
+  | { kind: "pending"; id: string; prompt: string; aspect: AspectRatio; createdAt: string }
   | { kind: "error"; id: string; prompt: string; message: string };
 
-const ASPECTS: AspectRatio[] = ["1:1", "4:3", "16:9", "9:16"];
+const entryId = (e: Entry) => (e.kind === "done" ? e.gen.id : e.id);
+
+const EXAMPLES = [
+  "A cozy cabin in a snowy pine forest at blue hour, warm light glowing from the windows, cinematic",
+  "Studio portrait of an elderly fisherman with a weathered face, dramatic rim lighting, 85mm photo",
+  "A futuristic city street at night in the rain, neon reflections, flying cars, ultra detailed",
+  "A bowl of ramen on a wooden table, steam rising, soft window light, food photography",
+];
 
 export default function Chat({ email }: { email: string | null }) {
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const [prompt, setPrompt] = useState("");
   const [aspect, setAspect] = useState<AspectRatio>("1:1");
   const [enhance, setEnhance] = useState(false);
   const [seed, setSeed] = useState("");
   const [busy, setBusy] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<Generation | null>(null);
+
+  const composer = useRef<ComposerHandle>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const entryRefs = useRef(new Map<string, HTMLDivElement>());
 
   const load = useCallback(async () => {
     try {
@@ -35,46 +54,61 @@ export default function Chat({ email }: { email: string | null }) {
       ]);
       setConfig(cfg);
       setMe(meRes);
-      // The API returns newest first; a chat reads oldest first.
+      // The API returns newest first; the conversation reads oldest first.
       setEntries(history.reverse().map((gen) => ({ kind: "done", gen })));
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Could not load your history.");
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
   useEffect(() => {
-    // Loading data from the API when the page opens.
+    // Load data from the API when the page opens.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 
+  // Keep the newest message in view.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scroller.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [entries.length]);
 
+  const history: HistoryItem[] = useMemo(
+    () =>
+      [...entries]
+        .reverse()
+        .flatMap((e): HistoryItem[] =>
+          e.kind === "done"
+            ? [toHistoryItem(e.gen)]
+            : e.kind === "pending"
+              ? [{ id: e.id, prompt: e.prompt, imageUrl: null, createdAt: e.createdAt, pending: true }]
+              : [],
+        ),
+    [entries],
+  );
+
   const maxChars = config?.max_prompt_chars ?? 1000;
-  const remaining = me ? me.daily_limit - me.used_today : null;
-  const canSend = !busy && prompt.trim().length > 0 && prompt.length <= maxChars && remaining !== 0;
+  const limitReached = me ? me.used_today >= me.daily_limit : false;
+  const canSend = !busy && prompt.trim().length > 0 && prompt.length <= maxChars && !limitReached;
 
   async function send() {
     if (!canSend) return;
     const text = prompt.trim();
     const id = crypto.randomUUID();
     setBusy(true);
-    setEntries((list) => [...list, { kind: "pending", id, prompt: text, aspect }]);
+    setEntries((list) => [...list, { kind: "pending", id, prompt: text, aspect, createdAt: new Date().toISOString() }]);
+    setActiveId(id);
     setPrompt("");
     try {
       const res = await api<GenerateResponse>("/api/generate", {
         method: "POST",
-        body: JSON.stringify({
-          prompt: text,
-          aspect_ratio: aspect,
-          enhance,
-          seed: seed.trim() === "" ? null : Number(seed),
-        }),
+        body: JSON.stringify({ prompt: text, aspect_ratio: aspect, enhance, seed: seed.trim() === "" ? null : Number(seed) }),
       });
       setEntries((list) => list.map((e) => (e.kind === "pending" && e.id === id ? { kind: "done", gen: res.generation } : e)));
+      setActiveId(res.generation.id);
       setMe((m) => (m ? { ...m, used_today: res.used_today, daily_limit: res.daily_limit } : m));
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Something went wrong.";
@@ -85,175 +119,151 @@ export default function Chat({ email }: { email: string | null }) {
     }
   }
 
+  function selectFromHistory(id: string) {
+    setActiveId(id);
+    setSidebarOpen(false);
+    entryRefs.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function newImage() {
+    setPrompt("");
+    setSeed("");
+    setActiveId(null);
+    setSidebarOpen(false);
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+    composer.current?.focus();
+  }
+
+  function remix(gen: Generation) {
+    setPrompt(gen.prompt);
+    setSeed(String(gen.seed));
+    setAspect(gen.aspect_ratio);
+    composer.current?.focus();
+  }
+
+  const modelName = config?.model.split("/").pop() ?? "";
+
   return (
-    <div className="flex h-dvh flex-col">
-      {/* Header */}
-      <header className="flex items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
-        <div className="min-w-0">
-          <h1 className="font-semibold">Image Chat</h1>
-          <p className="truncate text-xs text-neutral-500">
-            {config ? `${config.model.split("/").pop()}${config.worker_mode === "mock" ? " · MOCK MODE (placeholder images)" : ""}` : "…"}
-          </p>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          {me && (
-            <span className="rounded-full bg-neutral-100 px-3 py-1 dark:bg-neutral-800" title="Images left today (resets at 00:00 UTC)">
-              {me.daily_limit - me.used_today}/{me.daily_limit} left today
-            </span>
-          )}
-          <span className="hidden text-neutral-500 sm:inline">{email}</span>
-          <button onClick={() => supabase.auth.signOut()} className="underline">
-            Sign out
+    <div className="flex h-dvh overflow-hidden bg-[#0b0b10] text-zinc-100">
+      <Sidebar
+        items={history}
+        activeId={activeId}
+        me={me}
+        email={email}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        onSelect={selectFromHistory}
+        onNew={newImage}
+        onSignOut={() => supabase.auth.signOut()}
+      />
+
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        {/* Top bar */}
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/[0.06] px-4">
+          <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-1.5 text-zinc-400 hover:bg-white/5 hover:text-white md:hidden" aria-label="Open history">
+            <MenuIcon className="h-5 w-5" />
           </button>
-        </div>
-      </header>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-medium text-zinc-200">{modelName || "…"}</span>
+            {config?.worker_mode === "mock" && (
+              <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[11px] font-medium text-amber-300 ring-1 ring-amber-400/30">
+                Test mode · placeholder images
+              </span>
+            )}
+          </div>
+        </header>
 
-      {/* Messages */}
-      <main className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          {loadError && (
-            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-              {loadError}{" "}
-              <button onClick={load} className="underline">
-                Retry
-              </button>
-            </div>
-          )}
-          {entries.length === 0 && !loadError && (
-            <p className="mt-20 text-center text-neutral-500">Describe an image below to get started.</p>
-          )}
-          {entries.map((entry) => (
-            <ChatEntry key={entry.kind === "done" ? entry.gen.id : entry.id} entry={entry} />
-          ))}
-          <div ref={bottomRef} />
-        </div>
-      </main>
+        {/* Conversation */}
+        <div ref={scroller} className="flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 pb-48 pt-8">
+            {loadError && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+                {loadError}{" "}
+                <button onClick={load} className="font-medium underline">
+                  Retry
+                </button>
+              </div>
+            )}
 
-      {/* Prompt box */}
-      <footer className="border-t border-neutral-200 px-4 py-3 dark:border-neutral-800">
-        <div className="mx-auto max-w-3xl">
-          <div className="flex items-end gap-2">
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              rows={2}
-              placeholder={remaining === 0 ? "Daily limit reached. Come back tomorrow." : "Describe the image you want… (Enter to send, Shift+Enter for a new line)"}
-              disabled={remaining === 0}
-              className="flex-1 resize-none rounded-xl border border-neutral-300 bg-transparent px-3 py-2 outline-none focus:border-neutral-500 dark:border-neutral-700"
+            {loaded && entries.length === 0 && !loadError && (
+              <div className="mt-[8vh] flex flex-col items-center text-center">
+                <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-amber-400 shadow-xl shadow-fuchsia-500/20">
+                  <SparklesIcon className="h-7 w-7 text-white" />
+                </div>
+                <h2 className="mt-5 text-2xl font-semibold tracking-tight sm:text-3xl">What will you create today?</h2>
+                <p className="mt-2 max-w-md text-sm text-zinc-400">Describe a scene, a style and the lighting. The more detail, the better the image.</p>
+                <div className="mt-8 grid w-full gap-2 sm:grid-cols-2">
+                  {EXAMPLES.map((ex) => (
+                    <button
+                      key={ex}
+                      onClick={() => {
+                        setPrompt(ex);
+                        composer.current?.focus();
+                      }}
+                      className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 text-left text-[13px] leading-snug text-zinc-300 transition hover:border-white/20 hover:bg-white/[0.05]"
+                    >
+                      {ex}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {entries.map((entry) => {
+              const id = entryId(entry);
+              const text = entry.kind === "done" ? entry.gen.prompt : entry.prompt;
+              return (
+                <div
+                  key={id}
+                  ref={(el) => {
+                    if (el) entryRefs.current.set(id, el);
+                    else entryRefs.current.delete(id);
+                  }}
+                  className="flex scroll-mt-24 flex-col gap-4"
+                >
+                  {/* User prompt */}
+                  <div className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-3xl rounded-br-lg bg-white/[0.07] px-4 py-2.5 text-[15px] leading-relaxed text-zinc-100">
+                    {text}
+                  </div>
+                  {/* Reply */}
+                  {entry.kind === "pending" && <PendingCard aspect={entry.aspect} />}
+                  {entry.kind === "error" && (
+                    <div className="max-w-xl rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{entry.message}</div>
+                  )}
+                  {entry.kind === "done" && <ImageCard gen={entry.gen} onOpen={() => setViewing(entry.gen)} onRemix={() => remix(entry.gen)} />}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Prompt box floats over the bottom of the conversation */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0b0b10] via-[#0b0b10]/95 to-transparent px-4 pb-4 pt-10">
+          <div className="pointer-events-auto mx-auto max-w-3xl">
+            <Composer
+              ref={composer}
+              prompt={prompt}
+              setPrompt={setPrompt}
+              aspect={aspect}
+              setAspect={setAspect}
+              enhance={enhance}
+              setEnhance={setEnhance}
+              seed={seed}
+              setSeed={setSeed}
+              onSend={send}
+              canSend={canSend}
+              busy={busy}
+              maxChars={maxChars}
+              limitReached={limitReached}
             />
-            <button
-              onClick={send}
-              disabled={!canSend}
-              className="rounded-xl bg-neutral-900 px-5 py-3 font-medium text-white disabled:opacity-40 dark:bg-white dark:text-neutral-900"
-            >
-              {busy ? "…" : "Send"}
-            </button>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-neutral-600 dark:text-neutral-400">
-            <label className="flex items-center gap-1">
-              Aspect
-              <select
-                value={aspect}
-                onChange={(e) => setAspect(e.target.value as AspectRatio)}
-                className="rounded border border-neutral-300 bg-transparent px-1 py-0.5 dark:border-neutral-700"
-              >
-                {ASPECTS.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={enhance} onChange={(e) => setEnhance(e.target.checked)} />
-              Enhance prompt
-            </label>
-            <label className="flex items-center gap-1">
-              Seed
-              <input
-                inputMode="numeric"
-                placeholder="random"
-                value={seed}
-                onChange={(e) => setSeed(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                className="w-28 rounded border border-neutral-300 bg-transparent px-1 py-0.5 dark:border-neutral-700"
-              />
-            </label>
-            <span className={`ml-auto ${prompt.length > maxChars ? "text-red-600" : ""}`}>
-              {prompt.length}/{maxChars}
-            </span>
+            <p className="mt-2 text-center text-[11px] text-zinc-500">
+              {me ? `${Math.max(0, me.daily_limit - me.used_today)} of ${me.daily_limit} images left today · ` : ""}AI images can be imperfect.
+            </p>
           </div>
         </div>
-      </footer>
-    </div>
-  );
-}
-
-function ChatEntry({ entry }: { entry: Entry }) {
-  const prompt = entry.kind === "done" ? entry.gen.prompt : entry.prompt;
-  return (
-    <div className="flex flex-col gap-2">
-      {/* The user's prompt */}
-      <div className="self-end max-w-[85%] whitespace-pre-wrap rounded-2xl bg-neutral-900 px-4 py-2 text-white dark:bg-neutral-100 dark:text-neutral-900">
-        {prompt}
       </div>
 
-      {/* The reply: loading, error, or the image */}
-      {entry.kind === "pending" && (
-        <div className="self-start flex items-center gap-3 rounded-2xl bg-neutral-100 px-4 py-3 text-sm dark:bg-neutral-800">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-400 border-t-transparent" />
-          Generating your image ({entry.aspect})…
-        </div>
-      )}
-      {entry.kind === "error" && (
-        <div className="self-start rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
-          {entry.message}
-        </div>
-      )}
-      {entry.kind === "done" && <ImageReply gen={entry.gen} />}
-    </div>
-  );
-}
-
-function ImageReply({ gen }: { gen: Generation }) {
-  // Supabase adds a "download" header when the link has &download=<filename>.
-  const filename = `image-${gen.seed}.jpg`;
-  const downloadUrl = gen.image_url ? `${gen.image_url}${gen.image_url.includes("?") ? "&" : "?"}download=${filename}` : null;
-  return (
-    <div className="self-start w-full max-w-xl rounded-2xl bg-neutral-100 p-2 dark:bg-neutral-800">
-      {gen.image_url ? (
-        // eslint-disable-next-line @next/next/no-img-element -- signed, expiring Supabase links
-        <img
-          src={gen.image_url}
-          alt={gen.prompt}
-          width={gen.width}
-          height={gen.height}
-          className="h-auto w-full rounded-xl"
-        />
-      ) : (
-        <p className="p-4 text-sm text-neutral-500">Image unavailable.</p>
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-2 pt-2 text-xs text-neutral-500">
-        <span>
-          {gen.width}×{gen.height} · seed {gen.seed} · {new Date(gen.created_at).toLocaleString()}
-        </span>
-        {downloadUrl && (
-          <a href={downloadUrl} className="rounded-lg bg-neutral-900 px-3 py-1 font-medium text-white dark:bg-white dark:text-neutral-900">
-            Download
-          </a>
-        )}
-      </div>
-      {gen.prompt_used !== gen.prompt && (
-        <details className="px-2 pt-1 text-xs text-neutral-500">
-          <summary className="cursor-pointer">Enhanced prompt</summary>
-          {gen.prompt_used}
-        </details>
-      )}
+      {viewing && <Lightbox gen={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }

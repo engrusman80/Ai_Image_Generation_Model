@@ -169,3 +169,52 @@ def test_es256_tokens_via_jwks(monkeypatch):
     other = ec.generate_private_key(ec.SECP256R1())
     with pytest.raises(AuthError):
         auth_.verify(jwt.encode(_claims(), other, algorithm="ES256"))
+
+
+# --- local / RunPod-format worker client ------------------------------------
+
+import base64 as _b64
+import json as _json
+
+import httpx
+
+from app.worker_client import RunSyncWorker
+
+JOB = WorkerJob("a fox", 1024, 1024, 4, 1.0, 5, "black-forest-labs/FLUX.2-klein-4B")
+
+
+def _worker(handler):
+    return RunSyncWorker("http://worker/runsync", 5, transport=httpx.MockTransport(handler))
+
+
+def test_runsync_worker_sends_job_and_decodes_image():
+    seen = {}
+
+    def handler(request):
+        seen.update(_json.loads(request.content))
+        return httpx.Response(200, json={"status": "COMPLETED", "output": {"image_base64": _b64.b64encode(b"JPEGDATA").decode(), "content_type": "image/jpeg"}})
+
+    result = asyncio.run(_worker(handler).generate(JOB))
+    assert result.image == b"JPEGDATA"
+    assert seen["input"]["prompt"] == "a fox" and seen["input"]["seed"] == 5
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, json={"status": "FAILED", "error": "CUDA out of memory"}),
+        httpx.Response(500, text="boom"),
+        httpx.Response(200, json={"status": "COMPLETED", "output": {}}),
+    ],
+)
+def test_runsync_worker_errors_become_worker_errors(response):
+    with pytest.raises(WorkerError):
+        asyncio.run(_worker(lambda request: response).generate(JOB))
+
+
+def test_runsync_worker_unreachable():
+    def handler(request):
+        raise httpx.ConnectError("refused")
+
+    with pytest.raises(WorkerError, match="cannot reach"):
+        asyncio.run(_worker(handler).generate(JOB))
