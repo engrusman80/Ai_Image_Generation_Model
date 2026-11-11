@@ -27,4 +27,4 @@ The backend sends:
 }
 ```
 
-The worker replies with a JPEG image as base64: `{"image_base64": "...", "content_type": "image/jpeg"}`.
+The worker replies with a lossless PNG as base64: `{"image_base64": "...", "content_type": "image/png"}`.

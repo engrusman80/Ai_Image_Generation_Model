@@ -121,8 +121,21 @@ Everything is set through environment variables. The full list, with comments, i
 | `MAX_PROMPT_CHARS` | `1000` | Longest allowed prompt |
 
 Image sizes (about 1 megapixel each, sides divisible by 16): 1:1 = 1024×1024, 4:3 = 1152×864,
-16:9 = 1360×768, 9:16 = 768×1360. Images are saved as high-quality JPEG (quality 92), about
-5× smaller than PNG, so the free 1 GB of Supabase storage lasts much longer.
+16:9 = 1360×768, 9:16 = 768×1360.
+
+**Image formats:** every image is stored once as **lossless WebP** (no quality loss, about 1 MB).
+Users pick **PNG, JPEG or WebP** when downloading (the Format dropdown in the prompt box, or the
+Download ▾ menu on each image), and the backend converts at maximum quality (JPEG: quality 95, no
+colour subsampling). SVG is not offered: FLUX makes pixel images, and a real SVG needs vector
+tracing, which only suits logos and flat illustrations.
+
+## App features
+- ChatGPT-style layout: history sidebar grouped by date, search (Ctrl+K), ⋯ menu per image
+  (download, copy prompt, reuse, delete), collapsible sidebar, new image (Ctrl+Shift+O).
+- Under each image: Download ▾ (PNG/JPEG/WebP), copy prompt, regenerate, edit prompt, delete;
+  click the image for full-screen view.
+- Settings: theme (System/Light/Dark), default format, default aspect ratio, enhance by default,
+  export prompt history, delete all images, account, keyboard shortcuts.
 
 ## Cost protection
 

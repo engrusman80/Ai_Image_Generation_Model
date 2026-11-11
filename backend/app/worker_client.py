@@ -22,7 +22,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.config import Settings
 
-JPEG_QUALITY = 92  # good quality at ~5x smaller than PNG (matters for the free storage quota)
 
 
 @dataclass(frozen=True)
@@ -56,7 +55,7 @@ class MockWorker:
 
     async def generate(self, job: WorkerJob) -> WorkerResult:
         await asyncio.sleep(self.delay_seconds)  # pretend to work, so loading states are visible
-        return WorkerResult(_placeholder_jpeg(job), "image/jpeg")
+        return WorkerResult(_placeholder_png(job), "image/png")
 
 
 class RunSyncWorker:
@@ -90,7 +89,7 @@ class RunSyncWorker:
             image = base64.b64decode(output["image_base64"], validate=True)
         except (KeyError, binascii.Error):
             raise WorkerError("worker returned no valid image") from None
-        return WorkerResult(image, output.get("content_type", "image/jpeg"))
+        return WorkerResult(image, output.get("content_type", "image/png"))
 
 
 class NotReadyWorker:
@@ -110,7 +109,7 @@ def make_worker(settings: Settings):
     return NotReadyWorker("runpod", 3)
 
 
-def _placeholder_jpeg(job: WorkerJob) -> bytes:
+def _placeholder_png(job: WorkerJob) -> bytes:
     """A colourful gradient (different per seed) with the prompt written on it."""
     digest = hashlib.sha256(f"{job.seed}".encode()).digest()
     top, bottom = digest[:3], digest[3:6]
@@ -131,5 +130,5 @@ def _placeholder_jpeg(job: WorkerJob) -> bytes:
     draw.multiline_text((x, y), text, font=font, fill=(255, 255, 255), spacing=8, align="center")
 
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=JPEG_QUALITY)
+    img.save(buf, format="PNG")
     return buf.getvalue()

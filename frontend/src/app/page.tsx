@@ -5,11 +5,23 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import AuthForm from "@/components/AuthForm";
 import Chat from "@/components/Chat";
+import { applyTheme, useSettings } from "@/lib/settings";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
 
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
+  const { theme } = useSettings();
+
+  // Apply the chosen theme, and follow the device when it is "System".
+  useEffect(() => {
+    applyTheme(theme);
+    if (theme !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyTheme("system");
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [theme]);
 
   useEffect(() => {
     if (!supabaseConfigured) return;
@@ -25,7 +37,7 @@ export default function Home() {
     return (
       <div className="mx-auto mt-16 max-w-md p-6 text-sm">
         <h1 className="text-xl font-semibold">Setup needed</h1>
-        <p className="mt-2">
+        <p className="mt-2 text-muted">
           Copy <code>frontend/.env.example</code> to <code>frontend/.env.local</code>, fill in your Supabase URL and
           publishable key, then restart <code>npm run dev</code>.
         </p>
@@ -34,8 +46,8 @@ export default function Home() {
   }
   if (!ready)
     return (
-      <div className="grid min-h-dvh place-items-center bg-[#0b0b10]">
-        <span className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+      <div className="grid min-h-dvh place-items-center bg-app">
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-line-strong border-t-fg" />
       </div>
     );
   return session ? <Chat email={session.user.email ?? null} /> : <AuthForm />;

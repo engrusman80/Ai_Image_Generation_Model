@@ -1,33 +1,82 @@
 @import "tailwindcss";
 
-/* The app uses one dark theme (like ChatGPT's dark mode). */
+/* Dark mode is switched by the "dark" class on <html> (set from Settings -> Theme). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Colour tokens. Components use these names (bg-app, text-fg, border-line, ...) so that
+   both themes come from this one place. */
 :root {
-  --background: #0b0b10;
-  --foreground: #f4f4f5;
+  --app: #ffffff;
+  --panel: #f9f9fb;
+  --elev: #ffffff;
+  --fg: #18181b;
+  --fg-soft: #3f3f46;
+  --muted: #71717a;
+  --faint: #a1a1aa;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.16);
+  --hover: rgba(0, 0, 0, 0.04);
+  --active: rgba(0, 0, 0, 0.07);
+  --bubble: #f0f0f3;
+  --btn: #18181b;
+  --btn-fg: #ffffff;
+  --overlay: rgba(0, 0, 0, 0.35);
+  color-scheme: light;
+}
+
+.dark {
+  --app: #0b0b10;
+  --panel: #0f0f14;
+  --elev: #16161d;
+  --fg: #f4f4f5;
+  --fg-soft: #d4d4d8;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --hover: rgba(255, 255, 255, 0.05);
+  --active: rgba(255, 255, 255, 0.1);
+  --bubble: rgba(255, 255, 255, 0.07);
+  --btn: #ffffff;
+  --btn-fg: #000000;
+  --overlay: rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-app: var(--app);
+  --color-panel: var(--panel);
+  --color-elev: var(--elev);
+  --color-fg: var(--fg);
+  --color-fg-soft: var(--fg-soft);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-bubble: var(--bubble);
+  --color-btn: var(--btn);
+  --color-btn-fg: var(--btn-fg);
+  --color-overlay: var(--overlay);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--app);
+  color: var(--fg);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 ::selection {
-  background: rgba(139, 92, 246, 0.4);
+  background: rgba(139, 92, 246, 0.35);
 }
 
 /* Moving highlight over the "generating" placeholder */
 .shimmer {
-  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.07) 50%, transparent 70%);
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.12) 50%, transparent 70%);
   background-size: 250% 100%;
   animation: shimmer 2.2s linear infinite;
 }
@@ -36,8 +85,16 @@ body {
   to { background-position: -100% 0; }
 }
 
-/* Slim scrollbars */
+/* Gentle entrance for menus, dialogs and toasts */
+.pop-in {
+  animation: pop-in 0.14s ease-out;
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  scrollbar-color: var(--line-strong) transparent;
 }

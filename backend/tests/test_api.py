@@ -71,7 +71,7 @@ def test_generate_stores_image_and_history():
         assert (gen["width"], gen["height"], gen["seed"]) == (768, 1360, 7)
         assert r.json()["used_today"] == 1
         img = Image.open(io.BytesIO(next(iter(store.images.values()))))
-        assert img.size == (768, 1360) and img.format == "JPEG"
+        assert img.size == (768, 1360) and img.format == "WEBP"
 
         hist = client.get("/api/history", headers=auth()).json()
         assert [h["id"] for h in hist] == [gen["id"]]
@@ -218,3 +218,50 @@ def test_runsync_worker_unreachable():
 
     with pytest.raises(WorkerError, match="cannot reach"):
         asyncio.run(_worker(handler).generate(JOB))
+
+
+# --- storage format and downloads ---------------------------------------------
+
+
+def test_images_stored_lossless_and_downloadable_in_each_format():
+    client, store = make_client()
+    with client:
+        gen = client.post("/api/generate", json={"prompt": "a lighthouse", "aspect_ratio": "4:3"}, headers=auth()).json()["generation"]
+        stored = next(iter(store.images.values()))
+        assert Image.open(io.BytesIO(stored)).format == "WEBP"
+        for fmt, pil_name, ext in [("png", "PNG", "png"), ("jpeg", "JPEG", "jpg"), ("webp", "WEBP", "webp")]:
+            r = client.get(f"/api/generations/{gen['id']}/download?format={fmt}", headers=auth())
+            assert r.status_code == 200, r.text
+            img = Image.open(io.BytesIO(r.content))
+            assert img.format == pil_name and img.size == (1152, 864)
+            assert r.headers["content-disposition"].endswith(f'.{ext}"')
+        assert client.get(f"/api/generations/{gen['id']}/download?format=svg", headers=auth()).status_code == 422
+        # Another user cannot download it.
+        assert client.get(f"/api/generations/{gen['id']}/download", headers=auth("bob")).status_code == 404
+        assert client.get(f"/api/generations/{gen['id']}/download").status_code == 401
+
+
+def test_lossless_storage_keeps_pixels():
+    from app.image_formats import convert, to_storage
+
+    src = Image.effect_noise((64, 48), 80).convert("RGB")
+    buf = io.BytesIO()
+    src.save(buf, format="PNG")
+    back = Image.open(io.BytesIO(convert(to_storage(buf.getvalue()), "png"))).convert("RGB")
+    assert list(back.getdata()) == list(src.getdata())
+
+
+def test_delete_one_and_all_only_touch_own_images():
+    client, store = make_client(rate_limit_per_minute=100)
+    with client:
+        ids = [client.post("/api/generate", json={"prompt": f"p{i}"}, headers=auth()).json()["generation"]["id"] for i in range(3)]
+        client.post("/api/generate", json={"prompt": "bob's"}, headers=auth("bob"))
+        assert client.delete(f"/api/generations/{ids[0]}", headers=auth("bob")).status_code == 404
+        assert client.delete(f"/api/generations/{ids[0]}", headers=auth()).json() == {"deleted": 1}
+        assert len(client.get("/api/history", headers=auth()).json()) == 2
+        assert client.delete("/api/generations", headers=auth()).json() == {"deleted": 2}
+        assert client.get("/api/history", headers=auth()).json() == []
+        assert len(client.get("/api/history", headers=auth("bob")).json()) == 1
+        assert len(store.images) == 1  # only bob's file is left
+        # Deleting does not give back today's allowance.
+        assert client.get("/api/me", headers=auth()).json()["used_today"] == 3

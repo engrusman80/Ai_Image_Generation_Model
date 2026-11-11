@@ -1,4 +1,4 @@
-"""Loads a FLUX model once and turns jobs into JPEG images.
+"""Loads a FLUX model once and turns jobs into PNG images (lossless; the backend converts later).
 
 Memory modes (WORKER_MEMORY):
 - gpu:     everything on the GPU. Fastest. Needs ~16 GB+ for klein-4B (use on RunPod 24 GB+).
@@ -19,7 +19,6 @@ from dataclasses import dataclass
 
 log = logging.getLogger("worker")
 
-JPEG_QUALITY = 92
 PIPELINE_CLASSES = {"flux2-klein": "Flux2KleinPipeline", "flux1": "FluxPipeline"}
 MEMORY_MODES = ("auto", "gpu", "offload", "stream", "nf4")
 
@@ -124,7 +123,7 @@ class FluxEngine:
         log.info("model ready in %.0f s", self.load_seconds)
 
     def generate(self, job: Job) -> dict:
-        """Run one job. Returns the JPEG bytes plus timing and memory information."""
+        """Run one job. Returns PNG bytes plus timing and memory information."""
         import torch
 
         self.load()
@@ -146,7 +145,7 @@ class FluxEngine:
         seconds = time.perf_counter() - start
 
         buf = io.BytesIO()
-        image.convert("RGB").save(buf, format="JPEG", quality=JPEG_QUALITY)
+        image.convert("RGB").save(buf, format="PNG", compress_level=1)  # fast; size matters little here
         return {
             "image": buf.getvalue(),
             "seconds": round(seconds, 2),

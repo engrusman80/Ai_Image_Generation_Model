@@ -25,7 +25,7 @@ parser.add_argument("--steps", type=int, default=4)
 parser.add_argument("--guidance", type=float, default=1.0)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--memory", default=settings.MEMORY_MODE)
-parser.add_argument("--out", type=Path, default=Path("outputs/test.jpg"))
+parser.add_argument("--out", type=Path, default=Path("outputs/test.png"))
 args = parser.parse_args()
 
 engine = FluxEngine(settings.MODEL_ID, settings.MODEL_REVISION, args.memory)

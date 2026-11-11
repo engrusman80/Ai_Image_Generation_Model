@@ -1,37 +1,31 @@
 "use client";
 
-// A finished image with actions, the "generating" placeholder, and the full-screen viewer.
+// A finished image with its action bar, the "generating" placeholder, and the full-screen viewer.
 import { useEffect, useState } from "react";
-import type { AspectRatio, Generation } from "@/lib/api";
-import { CheckIcon, CloseIcon, CopyIcon, DownloadIcon, ExpandIcon, RefreshIcon } from "./icons";
+import { FORMATS, type AspectRatio, type DownloadFormat, type Generation } from "@/lib/api";
+import { CheckIcon, ChevronDownIcon, CloseIcon, CopyIcon, DownloadIcon, EditIcon, ExpandIcon, RefreshIcon, TrashIcon } from "./icons";
+import { Menu } from "./ui";
 
 const RATIO: Record<AspectRatio, string> = { "1:1": "1 / 1", "4:3": "4 / 3", "16:9": "16 / 9", "9:16": "9 / 16" };
 // Portrait images are narrower so they don't fill the whole screen height.
 const WIDTH: Record<AspectRatio, string> = { "1:1": "max-w-xl", "4:3": "max-w-2xl", "16:9": "max-w-3xl", "9:16": "max-w-sm" };
 
-export function downloadUrl(gen: Generation): string | null {
-  if (!gen.image_url) return null;
-  // Supabase sends the file as a download when the link has &download=<filename>.
-  return `${gen.image_url}${gen.image_url.includes("?") ? "&" : "?"}download=image-${gen.seed}.jpg`;
+const toolBtn = "grid h-8 w-8 place-items-center rounded-lg text-muted transition hover:bg-hover hover:text-fg";
+
+interface CardProps {
+  gen: Generation;
+  format: DownloadFormat;
+  onOpen: () => void;
+  onDownload: (format: DownloadFormat) => void;
+  onRegenerate: () => void;
+  onReuse: () => void;
+  onDelete: () => void;
 }
 
-function ActionButton({ onClick, href, title, children }: { onClick?: () => void; href?: string; title: string; children: React.ReactNode }) {
-  const cls = "grid h-9 w-9 place-items-center rounded-xl bg-black/50 text-white ring-1 ring-white/15 backdrop-blur-md transition hover:bg-black/70";
-  return href ? (
-    <a href={href} title={title} aria-label={title} className={cls}>
-      {children}
-    </a>
-  ) : (
-    <button onClick={onClick} title={title} aria-label={title} className={cls}>
-      {children}
-    </button>
-  );
-}
-
-export function ImageCard({ gen, onOpen, onRemix }: { gen: Generation; onOpen: () => void; onRemix: () => void }) {
+export function ImageCard({ gen, format, onOpen, onDownload, onRegenerate, onReuse, onDelete }: CardProps) {
   const [copied, setCopied] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const dl = downloadUrl(gen);
+  const formatLabel = FORMATS.find((f) => f.value === format)?.label ?? "PNG";
 
   async function copyPrompt() {
     await navigator.clipboard.writeText(gen.prompt);
@@ -41,8 +35,8 @@ export function ImageCard({ gen, onOpen, onRemix }: { gen: Generation; onOpen: (
 
   return (
     <div className={`w-full ${WIDTH[gen.aspect_ratio]}`}>
-      <div className="group relative overflow-hidden rounded-2xl bg-white/[0.03] ring-1 ring-white/10" style={{ aspectRatio: RATIO[gen.aspect_ratio] }}>
-        {!loaded && <div className="absolute inset-0 animate-pulse bg-white/[0.04]" />}
+      <div className="group relative overflow-hidden rounded-2xl bg-hover ring-1 ring-line" style={{ aspectRatio: RATIO[gen.aspect_ratio] }}>
+        {!loaded && <div className="absolute inset-0 animate-pulse bg-active" />}
         {gen.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element -- signed, expiring storage links
           <img
@@ -53,27 +47,53 @@ export function ImageCard({ gen, onOpen, onRemix }: { gen: Generation; onOpen: (
             className={`h-full w-full cursor-zoom-in object-cover transition duration-500 ${loaded ? "opacity-100" : "opacity-0"}`}
           />
         ) : (
-          <div className="grid h-full place-items-center text-sm text-zinc-500">Image unavailable</div>
+          <div className="grid h-full place-items-center text-sm text-muted">Image unavailable</div>
         )}
-        {/* Actions appear on hover (always visible on touch screens) */}
-        <div className="absolute right-3 top-3 flex gap-2 transition md:opacity-0 md:group-hover:opacity-100">
-          <ActionButton onClick={copyPrompt} title="Copy prompt">{copied ? <CheckIcon /> : <CopyIcon />}</ActionButton>
-          <ActionButton onClick={onRemix} title="Reuse prompt and seed"><RefreshIcon /></ActionButton>
-          <ActionButton onClick={onOpen} title="View full size"><ExpandIcon /></ActionButton>
-          {dl && <ActionButton href={dl} title="Download"><DownloadIcon /></ActionButton>}
+        <button
+          onClick={onOpen}
+          aria-label="View full size"
+          className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-xl bg-black/50 text-white ring-1 ring-white/15 backdrop-blur-md transition hover:bg-black/70 md:opacity-0 md:group-hover:opacity-100"
+        >
+          <ExpandIcon />
+        </button>
+      </div>
+
+      {/* Action bar, like the icons under a ChatGPT answer */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-0.5">
+        <div className="mr-1 flex items-center overflow-hidden rounded-lg ring-1 ring-line">
+          <button onClick={() => onDownload(format)} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium transition hover:bg-hover">
+            <DownloadIcon className="h-3.5 w-3.5" /> {formatLabel}
+          </button>
+          <Menu
+            label="Choose download format"
+            triggerClassName="border-l border-line px-1.5 py-1.5 text-muted transition hover:bg-hover hover:text-fg"
+            trigger={<ChevronDownIcon className="h-3.5 w-3.5" />}
+            align="left"
+            items={FORMATS.map((f) => ({ label: `Download ${f.label}`, hint: f.hint, onClick: () => onDownload(f.value) }))}
+          />
         </div>
+        <button onClick={copyPrompt} className={toolBtn} title="Copy prompt" aria-label="Copy prompt">
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </button>
+        <button onClick={onRegenerate} className={toolBtn} title="Regenerate (new seed)" aria-label="Regenerate">
+          <RefreshIcon />
+        </button>
+        <button onClick={onReuse} className={toolBtn} title="Edit prompt (reuse prompt & seed)" aria-label="Edit prompt">
+          <EditIcon />
+        </button>
+        <button onClick={onDelete} className={`${toolBtn} hover:text-red-500`} title="Delete" aria-label="Delete image">
+          <TrashIcon />
+        </button>
+        <span className="ml-auto px-1 text-[11px] text-faint">
+          {gen.width}×{gen.height} · seed {gen.seed}
+        </span>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-zinc-500">
-        <span>{gen.width}×{gen.height}</span>
-        <span>seed {gen.seed}</span>
-        <span>{new Date(gen.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-        {gen.prompt_used !== gen.prompt && (
-          <details className="w-full">
-            <summary className="cursor-pointer text-violet-300/80 hover:text-violet-200">Enhanced prompt</summary>
-            <p className="mt-1 leading-relaxed text-zinc-400">{gen.prompt_used}</p>
-          </details>
-        )}
-      </div>
+      {gen.prompt_used !== gen.prompt && (
+        <details className="mt-1 px-1 text-xs text-muted">
+          <summary className="cursor-pointer text-violet-600 hover:text-violet-500 dark:text-violet-300">Enhanced prompt</summary>
+          <p className="mt-1 leading-relaxed">{gen.prompt_used}</p>
+        </details>
+      )}
     </div>
   );
 }
@@ -86,12 +106,12 @@ export function PendingCard({ aspect }: { aspect: AspectRatio }) {
   }, []);
   return (
     <div className={`w-full ${WIDTH[aspect]}`}>
-      <div className="relative overflow-hidden rounded-2xl bg-[#14141b] ring-1 ring-white/10" style={{ aspectRatio: RATIO[aspect] }}>
-        <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-violet-600/20 via-fuchsia-500/10 to-amber-400/10" />
+      <div className="relative overflow-hidden rounded-2xl bg-hover ring-1 ring-line" style={{ aspectRatio: RATIO[aspect] }}>
+        <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-violet-500/25 via-fuchsia-500/15 to-amber-400/15" />
         <div className="shimmer absolute inset-0" />
         <div className="absolute inset-0 grid place-items-center">
-          <div className="flex flex-col items-center gap-3 text-sm text-zinc-300">
-            <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+          <div className="flex flex-col items-center gap-3 text-sm text-fg-soft">
+            <span className="h-8 w-8 animate-spin rounded-full border-2 border-line-strong border-t-fg" />
             <span>Creating your image… {seconds}s</span>
           </div>
         </div>
@@ -100,24 +120,28 @@ export function PendingCard({ aspect }: { aspect: AspectRatio }) {
   );
 }
 
-export function Lightbox({ gen, onClose }: { gen: Generation; onClose: () => void }) {
+export function Lightbox({ gen, onClose, onDownload }: { gen: Generation; onClose: () => void; onDownload: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  const dl = downloadUrl(gen);
+  const btn = "grid h-10 w-10 place-items-center rounded-xl bg-white/10 text-white ring-1 ring-white/15 transition hover:bg-white/20";
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black/90 backdrop-blur-md" onClick={onClose}>
       <div className="flex items-center justify-end gap-2 p-4" onClick={(e) => e.stopPropagation()}>
-        {dl && <ActionButton href={dl} title="Download"><DownloadIcon /></ActionButton>}
-        <ActionButton onClick={onClose} title="Close"><CloseIcon /></ActionButton>
+        <button onClick={onDownload} className={btn} title="Download" aria-label="Download">
+          <DownloadIcon />
+        </button>
+        <button onClick={onClose} className={btn} title="Close (Esc)" aria-label="Close">
+          <CloseIcon />
+        </button>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center px-4 pb-4">
         {/* eslint-disable-next-line @next/next/no-img-element -- signed, expiring storage links */}
         <img src={gen.image_url ?? ""} alt={gen.prompt} className="max-h-full max-w-full rounded-xl object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
       </div>
-      <p className="mx-auto max-w-3xl px-6 pb-6 text-center text-sm text-zinc-400" onClick={(e) => e.stopPropagation()}>
+      <p className="mx-auto max-w-3xl px-6 pb-6 text-center text-sm text-zinc-300" onClick={(e) => e.stopPropagation()}>
         {gen.prompt}
       </p>
     </div>

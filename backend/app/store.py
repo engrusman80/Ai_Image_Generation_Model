@@ -29,6 +29,10 @@ class Store(Protocol):
     async def save_image(self, path: str, data: bytes, content_type: str) -> None: ...
     async def insert_generation(self, row: dict[str, Any]) -> dict[str, Any]: ...
     async def list_generations(self, user_id: str, limit: int) -> list[dict[str, Any]]: ...
+    async def get_generation(self, user_id: str, generation_id: str) -> dict[str, Any] | None: ...
+    async def load_image(self, path: str) -> bytes: ...
+    async def delete_generations(self, user_id: str, generation_id: str | None) -> list[dict[str, Any]]: ...
+    async def delete_images(self, paths: list[str]) -> None: ...
     async def sign_urls(self, paths: list[str], ttl_seconds: int) -> dict[str, str]: ...
     async def close(self) -> None: ...
 
@@ -92,6 +96,37 @@ class SupabaseStore:
         )
         return resp.json()
 
+    async def get_generation(self, user_id: str, generation_id: str) -> dict[str, Any] | None:
+        """One image record, only if it belongs to this user."""
+        resp = await self._check(
+            await self.http.get(
+                "/rest/v1/generations",
+                params={"id": f"eq.{generation_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+            )
+        )
+        rows = resp.json()
+        return rows[0] if rows else None
+
+    async def load_image(self, path: str) -> bytes:
+        resp = await self._check(await self.http.get(f"/storage/v1/object/{self.bucket}/{path}"))
+        return resp.content
+
+    async def delete_generations(self, user_id: str, generation_id: str | None) -> list[dict[str, Any]]:
+        """Delete one of the user's image records (or all of them if generation_id is None)."""
+        params = {"user_id": f"eq.{user_id}"}
+        if generation_id is not None:
+            params["id"] = f"eq.{generation_id}"
+        resp = await self._check(
+            await self.http.delete("/rest/v1/generations", params=params, headers={"Prefer": "return=representation"})
+        )
+        return resp.json()
+
+    async def delete_images(self, paths: list[str]) -> None:
+        for i in range(0, len(paths), 100):  # the Storage API deletes up to 100+ files per call
+            await self._check(
+                await self.http.request("DELETE", f"/storage/v1/object/{self.bucket}", json={"prefixes": paths[i : i + 100]})
+            )
+
     async def sign_urls(self, paths: list[str], ttl_seconds: int) -> dict[str, str]:
         """Temporary download links for private images."""
         if not paths:
@@ -142,6 +177,23 @@ class MemoryStore:
     async def list_generations(self, user_id: str, limit: int) -> list[dict[str, Any]]:
         mine = [r for r in self.rows if r["user_id"] == user_id]
         return list(reversed(mine))[:limit]
+
+    async def get_generation(self, user_id: str, generation_id: str) -> dict[str, Any] | None:
+        return next((r for r in self.rows if r["id"] == generation_id and r["user_id"] == user_id), None)
+
+    async def load_image(self, path: str) -> bytes:
+        if path not in self.images:
+            raise StoreError(f"no image at {path}")
+        return self.images[path]
+
+    async def delete_generations(self, user_id: str, generation_id: str | None) -> list[dict[str, Any]]:
+        gone = [r for r in self.rows if r["user_id"] == user_id and generation_id in (None, r["id"])]
+        self.rows = [r for r in self.rows if r not in gone]
+        return gone
+
+    async def delete_images(self, paths: list[str]) -> None:
+        for p in paths:
+            self.images.pop(p, None)
 
     async def sign_urls(self, paths: list[str], ttl_seconds: int) -> dict[str, str]:
         return {p: f"memory://{p}" for p in paths if p in self.images}

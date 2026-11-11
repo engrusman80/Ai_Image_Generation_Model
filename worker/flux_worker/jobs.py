@@ -1,4 +1,4 @@
-"""Turns a request in the RunPod format ({"input": {...}}) into a response with a base64 JPEG.
+"""Turns a request in the RunPod format ({"input": {...}}) into a response with a base64 PNG.
 
 Used by both the local server and the RunPod handler, so they behave exactly the same.
 """
@@ -22,7 +22,7 @@ def run_job(engine: FluxEngine, job_input: dict) -> dict:
              job.width, job.height, job.steps, result["seconds"], result["peak_vram_gb"])
     return {
         "image_base64": base64.b64encode(result["image"]).decode("ascii"),
-        "content_type": "image/jpeg",
+        "content_type": "image/png",
         "seed": job.seed,
         "width": job.width,
         "height": job.height,

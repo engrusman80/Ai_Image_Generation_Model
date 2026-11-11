@@ -11,12 +11,14 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth import AuthError, SupabaseAuth, User
 from app.config import Settings, get_settings
+from app.image_formats import EXTENSIONS, MEDIA_TYPES, STORAGE_CONTENT_TYPE, STORAGE_EXTENSION, DownloadFormat, convert, to_storage
 from app.limits import JobGate, LimitError, RateLimiter
 from app.presets import ASPECT_RATIOS, get_preset
 from app.prompt_enhancer import enhance_prompt
@@ -49,8 +51,9 @@ def create_app(settings: Settings | None = None, store: Store | None = None, wor
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
+        expose_headers=["Content-Disposition"],
     )
     rate_limiter = RateLimiter(settings.rate_limit_per_minute)
     gate = JobGate(settings.max_concurrent_jobs, settings.queue_wait_seconds)
@@ -137,8 +140,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None, wor
             )
             try:
                 result = await request.app.state.worker.generate(job)
-                path = f"{user.id}/{uuid.uuid4().hex}.jpg"
-                await store.save_image(path, result.image, result.content_type)
+                path = f"{user.id}/{uuid.uuid4().hex}.{STORAGE_EXTENSION}"
+                try:
+                    stored = await run_in_threadpool(to_storage, result.image)
+                except OSError as exc:  # Pillow could not read what the worker sent
+                    raise WorkerError(f"worker returned an unreadable image: {exc}") from None
+                await store.save_image(path, stored, STORAGE_CONTENT_TYPE)
                 row = await store.insert_generation(
                     {
                         "user_id": user.id,
@@ -162,6 +169,40 @@ def create_app(settings: Settings | None = None, store: Store | None = None, wor
 
         urls = await store.sign_urls([row["image_path"]], settings.signed_url_ttl_seconds)
         return GenerateResponse(generation=to_generation(row, urls), used_today=used, daily_limit=settings.daily_limit)
+
+    async def _delete(store: Store, user_id: str, generation_id: str | None) -> int:
+        rows = await store.delete_generations(user_id, generation_id)
+        try:
+            await store.delete_images([r["image_path"] for r in rows])
+        except StoreError as exc:  # records are gone; a leftover file is harmless but worth logging
+            log.warning("could not delete image files for %s: %s", user_id, exc)
+        return len(rows)
+
+    @app.delete("/api/generations/{generation_id}")
+    async def delete_one(generation_id: uuid.UUID, request: Request, user: User = Depends(current_user)):
+        if await _delete(request.app.state.store, user.id, str(generation_id)) == 0:
+            raise HTTPException(404, "Image not found.")
+        return {"deleted": 1}
+
+    @app.delete("/api/generations")
+    async def delete_all(request: Request, user: User = Depends(current_user)):
+        """Settings -> Data controls -> Delete all my images."""
+        return {"deleted": await _delete(request.app.state.store, user.id, None)}
+
+    @app.get("/api/generations/{generation_id}/download")
+    async def download(generation_id: uuid.UUID, request: Request, format: DownloadFormat = "png", user: User = Depends(current_user)):
+        """The image converted to PNG, JPEG or WebP, as a file download."""
+        store: Store = request.app.state.store
+        row = await store.get_generation(user.id, str(generation_id))
+        if row is None:
+            raise HTTPException(404, "Image not found.")
+        try:
+            data = await store.load_image(row["image_path"])
+        except StoreError:
+            raise HTTPException(404, "Image file not found.") from None
+        body = await run_in_threadpool(convert, data, format)
+        filename = f"image-{row['seed']}.{EXTENSIONS[format]}"
+        return Response(body, media_type=MEDIA_TYPES[format], headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     return app
 

@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { LogoMark } from "./icons";
 
 const inputCls =
-  "w-full rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-[15px] text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-violet-400/50 focus:bg-white/[0.05]";
+  "w-full rounded-xl border border-line bg-elev px-3.5 py-2.5 text-[15px] text-fg outline-none transition placeholder:text-faint focus:border-violet-400/60";
 
 export default function AuthForm() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -39,9 +39,9 @@ export default function AuthForm() {
   }
 
   return (
-    <div className="grid min-h-dvh bg-[#0b0b10] text-zinc-100 lg:grid-cols-2">
+    <div className="grid min-h-dvh bg-app text-fg lg:grid-cols-2">
       {/* Showcase panel (large screens) */}
-      <div className="relative hidden overflow-hidden lg:block">
+      <div className="relative hidden overflow-hidden bg-[#0b0b10] text-white lg:block">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(139,92,246,0.45),transparent_55%),radial-gradient(ellipse_at_bottom_right,rgba(236,72,153,0.35),transparent_55%),radial-gradient(circle_at_70%_30%,rgba(251,191,36,0.18),transparent_40%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
         <div className="relative flex h-full flex-col justify-between p-12">
@@ -65,11 +65,11 @@ export default function AuthForm() {
             <span className="font-semibold tracking-tight">Image Studio</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">{mode === "signin" ? "Welcome back" : "Create your account"}</h1>
-          <p className="mt-1.5 text-sm text-zinc-400">{mode === "signin" ? "Sign in to continue creating." : "Start creating images in seconds."}</p>
+          <p className="mt-1.5 text-sm text-muted">{mode === "signin" ? "Sign in to continue creating." : "Start creating images in seconds."}</p>
 
           <button
             onClick={google}
-            className="mt-8 flex w-full items-center justify-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] py-2.5 text-sm font-medium transition hover:bg-white/[0.07]"
+            className="mt-8 flex w-full items-center justify-center gap-2.5 rounded-xl border border-line bg-elev py-2.5 text-sm font-medium shadow-sm transition hover:bg-hover"
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
               <path fill="#4285F4" d="M22.6 12.2c0-.8-.1-1.5-.2-2.2H12v4.2h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2.1-1.9 3.3-4.8 3.3-8z" />
@@ -80,8 +80,8 @@ export default function AuthForm() {
             Continue with Google
           </button>
 
-          <div className="my-6 flex items-center gap-3 text-xs text-zinc-500">
-            <span className="h-px flex-1 bg-white/10" /> or <span className="h-px flex-1 bg-white/10" />
+          <div className="my-6 flex items-center gap-3 text-xs text-faint">
+            <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
           </div>
 
           <form onSubmit={submit} className="space-y-3">
@@ -105,12 +105,12 @@ export default function AuthForm() {
             </button>
           </form>
 
-          {error && <p className="mt-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300 ring-1 ring-red-500/20">{error}</p>}
-          {notice && <p className="mt-4 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300 ring-1 ring-emerald-500/20">{notice}</p>}
+          {error && <p className="mt-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300 ring-1 ring-red-500/20">{error}</p>}
+          {notice && <p className="mt-4 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/20">{notice}</p>}
 
-          <p className="mt-8 text-center text-sm text-zinc-400">
+          <p className="mt-8 text-center text-sm text-muted">
             {mode === "signin" ? "Don't have an account? " : "Already have an account? "}
-            <button onClick={() => setMode(mode === "signin" ? "signup" : "signin")} className="font-medium text-violet-300 hover:text-violet-200">
+            <button onClick={() => setMode(mode === "signin" ? "signup" : "signin")} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-300">
               {mode === "signin" ? "Sign up" : "Sign in"}
             </button>
           </p>

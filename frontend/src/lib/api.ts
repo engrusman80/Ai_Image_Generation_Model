@@ -4,6 +4,13 @@ import { supabase } from "./supabase";
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
 export type AspectRatio = "1:1" | "4:3" | "16:9" | "9:16";
+export type DownloadFormat = "png" | "jpeg" | "webp";
+
+export const FORMATS: { value: DownloadFormat; label: string; hint: string }[] = [
+  { value: "png", label: "PNG", hint: "Lossless, best quality" },
+  { value: "jpeg", label: "JPEG", hint: "Smaller, works everywhere" },
+  { value: "webp", label: "WebP", hint: "Lossless, smaller than PNG" },
+];
 
 export interface Generation {
   id: string;
@@ -47,7 +54,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
 
@@ -77,5 +84,24 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
     throw new ApiError(message, res.status);
   }
-  return res.json() as Promise<T>;
+  return res;
+}
+
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await request(path, init)).json() as Promise<T>;
+}
+
+/** Download an image in the chosen format (the server converts it). */
+export async function downloadImage(gen: Generation, format: DownloadFormat): Promise<void> {
+  const res = await request(`/api/generations/${gen.id}/download?format=${format}`);
+  const blob = await res.blob();
+  const ext = format === "jpeg" ? "jpg" : format;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `image-${gen.seed}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
